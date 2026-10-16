@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:oneanime/pages/router.dart';
 import 'package:provider/provider.dart';
@@ -38,6 +41,16 @@ class NavigationBarState extends ChangeNotifier {
   }
 }
 
+/// Tapping the tab that is already selected, which pages answer by
+/// scrolling back to the top, as in Telegram.
+class TabReselect {
+  static final StreamController<int> _events = StreamController.broadcast();
+
+  static Stream<int> get events => _events.stream;
+
+  static void fire(int index) => _events.add(index);
+}
+
 class _ScaffoldMenu extends State<ScaffoldMenu> {
   final PageController _page = PageController();
   final mineController = Modular.get<MyController>();
@@ -54,6 +67,16 @@ class _ScaffoldMenu extends State<ScaffoldMenu> {
                 : bottomMenuWidget(context, state);
           });
         }));
+  }
+
+  void _onDestinationSelected(NavigationBarState state, int index) {
+    if (index == state.selectedIndex) {
+      TabReselect.fire(index);
+      return;
+    }
+    HapticFeedback.selectionClick();
+    state.updateSelectedIndex(index);
+    Modular.to.navigate("/tab${menu.getPath(index)}/");
   }
 
   Widget bottomMenuWidget(BuildContext context, NavigationBarState state) {
@@ -93,10 +116,8 @@ class _ScaffoldMenu extends State<ScaffoldMenu> {
                   ),
                 ],
                 selectedIndex: state.selectedIndex,
-                onDestinationSelected: (int index) {
-                  state.updateSelectedIndex(index);
-                  Modular.to.navigate("/tab${menu.getPath(index)}/");
-                },
+                onDestinationSelected: (int index) =>
+                    _onDestinationSelected(state, index),
               ));
   }
 
@@ -142,10 +163,8 @@ class _ScaffoldMenu extends State<ScaffoldMenu> {
                 ),
               ],
               selectedIndex: state.selectedIndex,
-              onDestinationSelected: (int index) {
-                state.updateSelectedIndex(index);
-                Modular.to.navigate("/tab${menu.getPath(index)}/");
-              },
+              onDestinationSelected: (int index) =>
+                  _onDestinationSelected(state, index),
             ),
           ),
           Expanded(

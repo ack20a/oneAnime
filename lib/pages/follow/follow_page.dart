@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:oneanime/pages/follow/follow_controller.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +22,7 @@ class _FollowPageState extends State<FollowPage>
   late NavigationBarState navigationBarState;
   late Translations i18n;
   final ScrollController scrollController = ScrollController();
+  StreamSubscription<int>? _reselect;
   final FollowController followController = Modular.get<FollowController>();
 
   @override
@@ -28,9 +31,17 @@ class _FollowPageState extends State<FollowPage>
   @override
   void initState() {
     super.initState();
+    _reselect = TabReselect.events.listen((int index) {
+      if (index == 2 && scrollController.hasClients) {
+        scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic);
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 在widget构建完成后调用的函数
-      navigationBarState = Provider.of<NavigationBarState>(context, listen: false);
+      navigationBarState =
+          Provider.of<NavigationBarState>(context, listen: false);
       navigationBarState.showNavigate();
     });
     followController.getFollowList();
@@ -41,6 +52,7 @@ class _FollowPageState extends State<FollowPage>
 
   @override
   void dispose() {
+    _reselect?.cancel();
     scrollController.removeListener(() {});
     super.dispose();
   }
@@ -87,7 +99,9 @@ class _FollowPageState extends State<FollowPage>
         itemBuilder: (context, index) {
           return followController.followList.isNotEmpty
               ? AnimeInfoCard(
-                  info: followController.followList[index], index: index, type: 'follow')
+                  info: followController.followList[index],
+                  index: index,
+                  type: 'follow')
               : SizedBox(
                   height: 600,
                   child: Column(

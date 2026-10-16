@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +13,7 @@ import 'package:mobx/mobx.dart' show reaction, ReactionDisposer;
 import 'package:oneanime/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:oneanime/pages/player/player_controller.dart';
 import 'package:oneanime/pages/player/player_panels.dart';
+import 'package:oneanime/pages/player/player_scrubber.dart';
 import 'package:oneanime/pages/popular/popular_controller.dart';
 import 'package:oneanime/pages/video/video_controller.dart';
 import 'package:oneanime/i18n/strings.g.dart';
@@ -69,6 +69,12 @@ class PlayerOverlayState extends State<PlayerOverlay> {
   Duration? _dragSeekTarget;
   Duration _dragSeekStart = Duration.zero;
   double _dragSeekDx = 0;
+
+  /// Where the swipe began; [_dragSeekStart] moves whenever the scrub speed
+  /// changes, this does not.
+  Duration _dragSeekOrigin = Duration.zero;
+  double _dragSeekStartY = 0;
+  double _dragSeekMultiplier = 1;
   bool _wasPlayingBeforeDrag = false;
 
   // 纵向拖动亮度 / 音量
@@ -219,8 +225,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
 
   void nextEpisode() {
     if (videoController.episode >= videoController.token.length) {
-      SmartDialog.showToast('已经是最新一集',
-          displayType: SmartToastType.onlyRefresh);
+      SmartDialog.showToast('已经是最新一集', displayType: SmartToastType.onlyRefresh);
       return;
     }
     SmartDialog.showToast('第 ${videoController.episode + 1} 话',
@@ -450,7 +455,10 @@ class PlayerOverlayState extends State<PlayerOverlay> {
     }
     _wasPlayingBeforeDrag = playerController.playing;
     _dragSeekStart = videoController.currentPosition;
+    _dragSeekOrigin = _dragSeekStart;
     _dragSeekDx = 0;
+    _dragSeekStartY = details.globalPosition.dy;
+    _dragSeekMultiplier = 1;
     _dragSeekTarget = _dragSeekStart;
   }
 
@@ -458,9 +466,19 @@ class PlayerOverlayState extends State<PlayerOverlay> {
     if (locked || _dragSeekTarget == null) {
       return;
     }
+    // Straying vertically slows the scrub down, re-anchored at the current
+    // target so the change of speed never jumps.
+    final double multiplier =
+        ScrubSpeed.multiplierFor(details.globalPosition.dy - _dragSeekStartY);
+    if (multiplier != _dragSeekMultiplier) {
+      _dragSeekMultiplier = multiplier;
+      _dragSeekStart = _dragSeekTarget!;
+      _dragSeekDx = 0;
+      HapticFeedback.lightImpact();
+    }
     _dragSeekDx += details.delta.dx;
     // A full swipe across the player covers two minutes.
-    final int deltaMs = (_dragSeekDx / width * 120000).round();
+    final int deltaMs = (_dragSeekDx / width * 120000 * multiplier).round();
     Duration target = _dragSeekStart + Duration(milliseconds: deltaMs);
     final Duration total = videoController.duration;
     if (target < Duration.zero) {
@@ -470,11 +488,13 @@ class PlayerOverlayState extends State<PlayerOverlay> {
       target = total;
     }
     _dragSeekTarget = target;
-    final int diff = (target - _dragSeekStart).inSeconds;
+    final int diff = (target - _dragSeekOrigin).inSeconds;
+    final String speed = ScrubSpeed.labelFor(multiplier);
     _showHint(
       diff >= 0 ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded,
       '${Utils.durationToString(target)} / ${Utils.durationToString(total)}'
-      '  (${diff >= 0 ? '+' : ''}$diff 秒)',
+      '  (${diff >= 0 ? '+' : ''}$diff 秒)'
+      '${speed.isEmpty ? '' : '\n$speed'}',
       sticky: true,
     );
   }
@@ -500,12 +520,10 @@ class PlayerOverlayState extends State<PlayerOverlay> {
     _verticalOnLeft = details.localPosition.dx < width / 2;
     _verticalDy = 0;
     // Start from the last known value until the platform answers.
-    _verticalStartValue = _verticalOnLeft
-        ? videoController.brightness
-        : videoController.volume;
-    _verticalStartValue = _verticalOnLeft
-        ? await _currentBrightness()
-        : await _currentVolume();
+    _verticalStartValue =
+        _verticalOnLeft ? videoController.brightness : videoController.volume;
+    _verticalStartValue =
+        _verticalOnLeft ? await _currentBrightness() : await _currentVolume();
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails details, double height) {
@@ -649,7 +667,9 @@ class PlayerOverlayState extends State<PlayerOverlay> {
                         onPressed: () {
                           setState(() => locked = !locked);
                           _showHint(
-                              locked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                              locked
+                                  ? Icons.lock_rounded
+                                  : Icons.lock_open_rounded,
                               locked ? '屏幕已锁定' : '屏幕已解锁');
                           showControls();
                         },
@@ -765,32 +785,24 @@ class PlayerOverlayState extends State<PlayerOverlay> {
           colors: [Color(0xB3000000), Color(0x00000000)],
         ),
       ),
-      padding: EdgeInsets.fromLTRB(fullscreen ? 20 : 8, 20,
-          fullscreen ? 20 : 8, fullscreen ? 8 : 0),
+      padding: EdgeInsets.fromLTRB(
+          fullscreen ? 20 : 8, 20, fullscreen ? 20 : 8, fullscreen ? 8 : 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Observer(builder: (context) {
-              return ProgressBar(
-                timeLabelLocation: TimeLabelLocation.none,
-                progress: videoController.currentPosition,
+              return PlayerScrubber(
+                position: videoController.currentPosition,
                 buffered: videoController.buffer,
-                total: videoController.duration,
-                barHeight: 3,
-                thumbRadius: 6,
-                thumbGlowRadius: 16,
-                progressBarColor: scheme.primary,
-                thumbColor: scheme.primary,
-                bufferedBarColor: Colors.white38,
-                baseBarColor: Colors.white24,
-                onDragStart: (_) => _hideTimer?.cancel(),
-                onDragEnd: _scheduleHide,
-                onSeek: (duration) {
-                  playerController.seek(duration);
-                  _scheduleHide();
-                },
+                duration: videoController.duration,
+                playing: videoController.playing,
+                rate: videoController.playerSpeed,
+                color: scheme.primary,
+                onScrubStart: () => _hideTimer?.cancel(),
+                onScrubEnd: _scheduleHide,
+                onSeek: playerController.seek,
               );
             }),
           ),
@@ -856,8 +868,8 @@ class PlayerOverlayState extends State<PlayerOverlay> {
                       ),
                   ],
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 12),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                     child: Text(
                       speed == 1.0 ? '倍速' : '${speed}x',
                       style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -865,8 +877,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
                   ),
                 );
               }),
-              if (fullscreen)
-                _TextAction(text: '选集', onPressed: openEpisodes),
+              if (fullscreen) _TextAction(text: '选集', onPressed: openEpisodes),
               IconButton(
                 color: Colors.white,
                 tooltip: fullscreen ? '退出全屏' : '全屏',

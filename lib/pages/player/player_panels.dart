@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:hive/hive.dart';
+import 'package:oneanime/bean/danmaku/danmaku_source.dart';
 import 'package:oneanime/pages/player/player_controller.dart';
 import 'package:oneanime/pages/settings/danmaku_style_editor.dart';
 import 'package:oneanime/pages/video/video_controller.dart';
@@ -119,31 +120,65 @@ class _PlayerSettingsPanelState extends State<PlayerSettingsPanel> {
           title: const Text('重新加载视频'),
           subtitle: const Text('画面卡住或加载失败时可以试试'),
           onTap: () {
-            playerController
-                .init(videoController.currentPosition.inSeconds);
+            playerController.init(videoController.currentPosition.inSeconds);
           },
         ),
       ],
     );
   }
 
+  /// Reloads the current episode from [source], or from the configured
+  /// sources when null. The choice holds for later episodes too, until the
+  /// player is closed.
+  void _switchDanmakuSource(DanmakuSource? source) {
+    setState(() => videoController.danmakuSourceOverride = source);
+    playerController.clearDanmaku();
+    videoController
+        .getDanDanmaku(videoController.title, videoController.episode)
+        .catchError((Object e) {
+      debugPrint('切换弹幕来源失败 ${e.toString()}');
+    });
+  }
+
   Widget _danmakuTab() {
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
-        Observer(builder: (context) {
-          return SwitchListTile(
-            title: const Text('显示弹幕'),
-            subtitle: Text(videoController.danDanmakus.isEmpty
-                ? '当前剧集没有找到弹幕'
-                : '本集共 ${videoController.danDanmakus.values.fold<int>(0, (sum, list) => sum + list.length)} 条弹幕'),
-            value: videoController.danmakuOn,
-            onChanged: (value) {
-              playerController.clearDanmaku();
-              videoController.danmakuOn = value;
-            },
-          );
-        }),
+        ValueListenableBuilder<DanmakuLoadState>(
+          valueListenable: videoController.danmakuLoadState,
+          builder: (context, state, _) {
+            return Observer(builder: (context) {
+              return SwitchListTile(
+                title: const Text('显示弹幕'),
+                subtitle: Text(state.summary),
+                value: videoController.danmakuOn,
+                onChanged: (value) {
+                  playerController.clearDanmaku();
+                  videoController.danmakuOn = value;
+                },
+              );
+            });
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final DanmakuSource? source in [
+                null,
+                ...DanmakuSource.values,
+              ])
+                ChoiceChip(
+                  label: Text(source?.label ?? '自动'),
+                  tooltip: source?.description ?? '按弹幕设置里的来源和顺序',
+                  selected: videoController.danmakuSourceOverride == source,
+                  onSelected: (_) => _switchDanmakuSource(source),
+                ),
+            ],
+          ),
+        ),
         DanmakuStyleEditor(
           settings: playerController.danmakuSettings,
           onChanged: () => playerController.applyDanmakuSettings(),

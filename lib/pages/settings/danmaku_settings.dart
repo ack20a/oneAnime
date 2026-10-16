@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:oneanime/bean/danmaku/danmaku_settings.dart';
 import 'package:oneanime/bean/settings/settings.dart';
+import 'package:oneanime/pages/settings/danmaku_source_editor.dart';
 import 'package:oneanime/pages/settings/danmaku_style_editor.dart';
 import 'package:oneanime/utils/storage.dart';
 import 'package:oneanime/bean/appbar/sys_app_bar.dart';
@@ -32,9 +33,12 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
           ),
           SetSwitchItem(
             title: i18n.my.danmakuSettings.enhance,
+            subTitle: '弹弹Play 搜不到时借助 Bangumi 匹配番名',
             setKey: SettingBoxKey.danmakuEnhance,
             defaultVal: true,
           ),
+          const Divider(height: 1),
+          const DanmakuSourceEditor(),
           const Divider(height: 1),
           DanmakuStyleEditor(
             settings: danmakuSettings,

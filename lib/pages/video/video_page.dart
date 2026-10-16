@@ -137,6 +137,7 @@ class _VideoPageState extends State<VideoPage>
   void init() async {
     videoController.danmakuOn =
         setting.get(SettingBoxKey.danmakuEnabledByDefault, defaultValue: false);
+    videoController.danmakuSourceOverride = null;
     playerController.reloadDanmakuSettings();
     // 播放器初始化
     videoController.playerSpeed = 1.0;

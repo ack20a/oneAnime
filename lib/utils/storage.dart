@@ -61,10 +61,13 @@ class SettingBoxKey {
   static const String HAenable = 'HAenable',
       // 检查是否为第一次运行
       firstRun = 'firstRun',
-      searchEnhanceEnable = 'searchEnhanceEnable', 
+      searchEnhanceEnable = 'searchEnhanceEnable',
       autoUpdate = 'autoUpdate',
       alwaysOntop = 'alwaysOntop',
       danmakuEnhance = 'danmakuEnhance',
+      danmakuSourceOrder = 'danmakuSourceOrder',
+      danmakuSourceEnabled = 'danmakuSourceEnabled',
+      danmakuSourceMerge = 'danmakuSourceMerge',
       danmakuBorder = 'danmakuBorder',
       danmakuOpacity = 'danmakuOpacity',
       danmakuFontSize = 'danmakuFontSize',
@@ -97,6 +100,7 @@ class SettingBoxKey {
       playResume = 'playResume',
       oledEnhance = 'oledEnhance',
       displayMode = 'displayMode',
+
       /// deprecated
       isWideScreen = 'isWideScreen',
       enableSystemProxy = 'enableSystemProxy',

@@ -8,6 +8,7 @@ import 'package:oneanime/pages/player/player_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:oneanime/request/danmaku.dart';
 import 'package:oneanime/bean/danmaku/danmaku_module.dart';
+import 'package:oneanime/bean/danmaku/danmaku_source.dart';
 import 'package:oneanime/utils/storage.dart';
 import 'package:hive/hive.dart';
 
@@ -124,29 +125,73 @@ abstract class _VideoController with Store {
     }
   }
 
-  /// 巴哈姆特動畫瘋 needs no credentials and carries most of what Anime1 does,
-  /// so it goes first. Bilibili covers much of the rest; 弹弹Play comes last
-  /// and only works in builds that ship valid 弹弹Play credentials.
+  final ValueNotifier<DanmakuLoadState> danmakuLoadState =
+      ValueNotifier(const DanmakuLoadState.done([], 0));
+
+  /// A source picked in the player for the rest of this viewing, overriding
+  /// the configured ones; null follows the settings.
+  DanmakuSource? danmakuSourceOverride;
+
+  /// Loads from the configured sources in priority order: by default the
+  /// first one that has the episode wins, or with merging on, all of them
+  /// are combined with duplicates dropped (弹弹Play itself relays 巴哈姆特
+  /// and Bilibili, so the same danmaku can arrive twice).
   Future<void> getDanDanmaku(String title, int episode) async {
     final int requestId = ++_danmakuRequestId;
     danDanmakus.clear();
+    danmakuLoadState.value = const DanmakuLoadState.loading();
 
-    List<Danmaku> res = await _bahaDanmaku(title, episode);
-    if (res.isEmpty) {
-      res = await _biliDanmaku(title, episode);
-    }
-    if (res.isEmpty) {
-      res = await _dandanDanmaku(title, episode);
+    final DanmakuSourceSettings config = DanmakuSourceSettings.load();
+    final DanmakuSource? override = danmakuSourceOverride;
+    final List<DanmakuSource> sources =
+        override != null ? [override] : config.active;
+    final List<DanmakuSource> used = [];
+    final List<Danmaku> res = [];
+    if (override == null && config.merge) {
+      final List<List<Danmaku>> results = await Future.wait(
+          sources.map((source) => _danmakuFrom(source, title, episode)));
+      final Set<String> seen = {};
+      for (int i = 0; i < sources.length; i++) {
+        if (results[i].isEmpty) {
+          continue;
+        }
+        used.add(sources[i]);
+        for (final Danmaku danmaku in results[i]) {
+          if (seen.add('${danmaku.p.round()}|${danmaku.m}')) {
+            res.add(danmaku);
+          }
+        }
+      }
+    } else {
+      for (final DanmakuSource source in sources) {
+        final List<Danmaku> danmakus =
+            await _danmakuFrom(source, title, episode);
+        if (danmakus.isNotEmpty) {
+          used.add(source);
+          res.addAll(danmakus);
+          break;
+        }
+      }
     }
     if (requestId != _danmakuRequestId) {
       return;
     }
     _addDanmakus(res);
-    debugPrint('当前弹幕库 ${danDanmakus.length}');
+    danmakuLoadState.value = DanmakuLoadState.done(used, res.length);
+    debugPrint('当前弹幕库 ${danDanmakus.length} 来源 $used');
     if (res.isEmpty && danmakuOn) {
-      SmartDialog.showToast('没有找到本集的弹幕',
+      SmartDialog.showToast(sources.isEmpty ? '所有弹幕来源都已关闭' : '没有找到本集的弹幕',
           displayType: SmartToastType.onlyRefresh);
     }
+  }
+
+  Future<List<Danmaku>> _danmakuFrom(
+      DanmakuSource source, String title, int episode) {
+    return switch (source) {
+      DanmakuSource.baha => _bahaDanmaku(title, episode),
+      DanmakuSource.bilibili => _biliDanmaku(title, episode),
+      DanmakuSource.dandan => _dandanDanmaku(title, episode),
+    };
   }
 
   Future<List<Danmaku>> _bahaDanmaku(String title, int episode) async {

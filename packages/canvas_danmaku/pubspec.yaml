@@ -1,0 +1,17 @@
+name: canvas_danmaku
+description: "A high performance danmaku lib for flutter."
+version: 0.3.2+oneanime
+homepage: https://github.com/Predidit/canvas_danmaku
+publish_to: 'none'
+
+# Vendored from canvas_danmaku 0.3.2 (MIT). Local changes: configurable
+# danmaku border styles (stroke / shadow / glow / background), readable
+# outlines for dark coloured danmaku, and font family kept across redraws.
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter

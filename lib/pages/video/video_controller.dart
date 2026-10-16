@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:mobx/mobx.dart';
 import 'package:oneanime/pages/popular/popular_controller.dart';
 import 'package:oneanime/request/video.dart';
@@ -80,26 +81,42 @@ abstract class _VideoController with Store {
     this.playerSpeed = playerSpeed;
   }
 
+  bool _changingEpisode = false;
+
   Future changeEpisode(int episode) async {
-    final PlayerController playerController = Modular.get<PlayerController>();
-    final PopularController popularController =
-        Modular.get<PopularController>();
-    popularController.updateAnimeProgress(episode, title);
-    var result = await VideoRequest.getVideoLink(token[token.length - episode]);
-    videoUrl = result['link'];
-    videoCookie = result['cookie'];
-    playerController.videoUrl = videoUrl;
-    playerController.videoCookie = videoCookie;
-    this.episode = episode;
-    playing = false;
-    currentPosition = Duration.zero;
-    duration = Duration.zero;
-    // Loading must not block the switch, so an enclosing try/catch cannot help.
-    unawaited(getDanDanmaku(title, episode).catchError((e) {
-      debugPrint('弹幕加载错误 ${e.toString()}');
-    }));
-    playerSpeed = 1.0;
-    await playerController.init(0);
+    if (_changingEpisode || episode < 1 || episode > token.length) {
+      return;
+    }
+    _changingEpisode = true;
+    try {
+      final PlayerController playerController =
+          Modular.get<PlayerController>();
+      final PopularController popularController =
+          Modular.get<PopularController>();
+      popularController.updateAnimeProgress(episode, title);
+      var result =
+          await VideoRequest.getVideoLink(token[token.length - episode]);
+      videoUrl = result['link'];
+      videoCookie = result['cookie'];
+      playerController.videoUrl = videoUrl;
+      playerController.videoCookie = videoCookie;
+      this.episode = episode;
+      playing = false;
+      currentPosition = Duration.zero;
+      buffer = Duration.zero;
+      duration = Duration.zero;
+      // Loading must not block the switch, so an enclosing try/catch cannot help.
+      unawaited(getDanDanmaku(title, episode).catchError((e) {
+        debugPrint('弹幕加载错误 ${e.toString()}');
+      }));
+      // The chosen speed carries over to the next episode.
+      await playerController.init(0);
+    } catch (e) {
+      debugPrint('切换剧集失败 ${e.toString()}');
+      SmartDialog.showToast('切换剧集失败，请稍后重试');
+    } finally {
+      _changingEpisode = false;
+    }
   }
 
   void _addDanmakus(List<Danmaku> danmakus) {

@@ -20,7 +20,8 @@ jobs:
     name: "Build Android APK"
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # Needed to publish the test prerelease.
+      contents: write
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
@@ -82,3 +83,20 @@ jobs:
           name: oneAnime_android_${{ github.sha }}
           path: dist/*.apk
           retention-days: 14
+
+      # Artifacts need a GitHub login and arrive zipped, which is awkward on a
+      # phone. Keep one prerelease per branch whose APKs download directly.
+      - name: Publish test prerelease
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          tag="canary-$(echo "$branch" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')"
+          short_sha="${GITHUB_SHA::7}"
+          gh release delete "$tag" --cleanup-tag --yes || true
+          gh release create "$tag" dist/*.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "测试版 ${branch} (${short_sha})" \
+            --notes "分支 \`${branch}\` 提交 ${short_sha} 的自动构建，仅供测试。大多数手机下载 arm64-v8a 版本即可。"

@@ -89,8 +89,7 @@ abstract class _VideoController with Store {
     }
     _changingEpisode = true;
     try {
-      final PlayerController playerController =
-          Modular.get<PlayerController>();
+      final PlayerController playerController = Modular.get<PlayerController>();
       final PopularController popularController =
           Modular.get<PopularController>();
       popularController.updateAnimeProgress(episode, title);
@@ -125,37 +124,52 @@ abstract class _VideoController with Store {
     }
   }
 
-  /// The credential problem is the same for every episode, say it once.
-  static bool _authErrorShown = false;
-
+  /// 巴哈姆特動畫瘋 needs no credentials and carries most of what Anime1 does,
+  /// so it goes first; 弹弹Play only fills in when it has nothing, and only
+  /// works in builds that ship valid 弹弹Play credentials.
   Future<void> getDanDanmaku(String title, int episode) async {
-    try {
-      await _loadDanDanmaku(title, episode);
-    } on DanmakuAuthException catch (e) {
-      debugPrint('弹弹Play 认证失败 ${e.reason}');
-      if (!_authErrorShown) {
-        _authErrorShown = true;
-        SmartDialog.showToast('弹幕加载失败：弹弹Play API 密钥无效或未配置',
-            displayType: SmartToastType.onlyRefresh);
-      }
-    }
-  }
-
-  Future<void> _loadDanDanmaku(String title, int episode) async {
     final int requestId = ++_danmakuRequestId;
     danDanmakus.clear();
 
-    final int? animeId = await DanmakuRequest.getDandanAnimeId(title);
-    List<Danmaku> res = await _danmakuOf(animeId, episode);
-    if (res.isEmpty &&
-        setting.get(SettingBoxKey.danmakuEnhance, defaultValue: true)) {
-      res = await _danmakuOf(await _bgmAnimeId(title), episode);
+    List<Danmaku> res = await _bahaDanmaku(title, episode);
+    if (res.isEmpty) {
+      res = await _dandanDanmaku(title, episode);
     }
     if (requestId != _danmakuRequestId) {
       return;
     }
     _addDanmakus(res);
     debugPrint('当前弹幕库 ${danDanmakus.length}');
+    if (res.isEmpty && danmakuOn) {
+      SmartDialog.showToast('没有找到本集的弹幕',
+          displayType: SmartToastType.onlyRefresh);
+    }
+  }
+
+  Future<List<Danmaku>> _bahaDanmaku(String title, int episode) async {
+    try {
+      return await DanmakuRequest.getBahaDanmaku(title, episode);
+    } catch (e) {
+      debugPrint('巴哈姆特弹幕加载失败 ${e.toString()}');
+      return [];
+    }
+  }
+
+  Future<List<Danmaku>> _dandanDanmaku(String title, int episode) async {
+    try {
+      final int? animeId = await DanmakuRequest.getDandanAnimeId(title);
+      List<Danmaku> res = await _danmakuOf(animeId, episode);
+      if (res.isEmpty &&
+          setting.get(SettingBoxKey.danmakuEnhance, defaultValue: true)) {
+        res = await _danmakuOf(await _bgmAnimeId(title), episode);
+      }
+      return res;
+    } on DanmakuAuthException catch (e) {
+      debugPrint('弹弹Play 认证失败 ${e.reason}');
+    } catch (e) {
+      debugPrint('弹弹Play 弹幕加载失败 ${e.toString()}');
+    }
+    return [];
   }
 
   Future<List<Danmaku>> _danmakuOf(int? animeId, int episode) async {

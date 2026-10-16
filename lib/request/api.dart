@@ -14,6 +14,11 @@ class Api {
   static const String dandanAPIComment = "/api/v2/comment/";
   static const String dandanAPISearch = "/api/v2/search/anime";
   static const String dandanAPIBgmtv = "/api/v2/bangumi/bgmtv/";
+  // 巴哈姆特動畫瘋, public and keyless
+  static const String bahaSearch =
+      'https://api.gamer.com.tw/mobile_app/anime/v1/search.php';
+  static const String bahaVideo = 'https://api.gamer.com.tw/anime/v1/video.php';
+  static const String bahaDanmu = 'https://api.gamer.com.tw/anime/v1/danmu.php';
   // github update
   static const String latestApp =
       'https://api.github.com/repos/Predidit/oneAnime/releases/latest';

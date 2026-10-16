@@ -8,6 +8,16 @@ import 'package:oneanime/bean/danmaku/danmaku_module.dart';
 import 'package:oneanime/utils/utils.dart';
 import 'package:oneanime/utils/mortis.dart';
 
+/// 弹弹Play rejected the app credentials, so no danmaku can load at all.
+class DanmakuAuthException implements Exception {
+  final String reason;
+
+  DanmakuAuthException(this.reason);
+
+  @override
+  String toString() => 'DanmakuAuthException: $reason';
+}
+
 class DanmakuRequest {
   /// Request.get() reports network failures as a normal response carrying
   /// {'message': ...}, and the APIs may answer with HTML, so a response body is
@@ -41,7 +51,12 @@ class DanmakuRequest {
     final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final res = await Request().get(Api.dandanAPIDomain + path,
         data: query,
-        options: Options(headers: {
+        options: Options(
+            // Status codes are checked here, so a rejected signature is not
+            // reported as a generic "Server error" toast.
+            validateStatus: (_) => true,
+            extra: {'silent': true},
+            headers: {
           'user-agent': Utils.getRandomUA(),
           'referer': '',
           'X-Auth': 1,
@@ -49,6 +64,10 @@ class DanmakuRequest {
           'X-Timestamp': timestamp.toString(),
           'X-Signature': Utils.generateDandanSignature(path, timestamp),
         }));
+    if (res.statusCode == 401 || res.statusCode == 403) {
+      throw DanmakuAuthException(
+          res.headers.value('x-error-message') ?? 'HTTP ${res.statusCode}');
+    }
     return _asJsonMap(res.data);
   }
 

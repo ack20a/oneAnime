@@ -17,7 +17,8 @@ class ApiInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     String url = err.requestOptions.uri.toString();
-    if (!url.contains('heartBeat')) {
+    final bool silent = err.requestOptions.extra['silent'] == true;
+    if (!url.contains('heartBeat') && !silent) {
       SmartDialog.showToast(
         await dioError(err),
         displayType: SmartToastType.onlyRefresh,

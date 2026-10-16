@@ -125,7 +125,23 @@ abstract class _VideoController with Store {
     }
   }
 
+  /// The credential problem is the same for every episode, say it once.
+  static bool _authErrorShown = false;
+
   Future<void> getDanDanmaku(String title, int episode) async {
+    try {
+      await _loadDanDanmaku(title, episode);
+    } on DanmakuAuthException catch (e) {
+      debugPrint('弹弹Play 认证失败 ${e.reason}');
+      if (!_authErrorShown) {
+        _authErrorShown = true;
+        SmartDialog.showToast('弹幕加载失败：弹弹Play API 密钥无效或未配置',
+            displayType: SmartToastType.onlyRefresh);
+      }
+    }
+  }
+
+  Future<void> _loadDanDanmaku(String title, int episode) async {
     final int requestId = ++_danmakuRequestId;
     danDanmakus.clear();
 

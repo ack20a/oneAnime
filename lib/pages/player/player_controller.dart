@@ -64,7 +64,6 @@ abstract class _PlayerController with Store {
   int _lastDanmakuSecond = -1;
 
   bool _completedHandled = false;
-  String _lastError = '';
   DateTime _lastErrorAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // 当前播放器状态
@@ -133,9 +132,6 @@ abstract class _PlayerController with Store {
     // 该设置可以在所有平台上正确启用双重缓存
     await pp.setProperty("demuxer-cache-dir", await Utils.getPlayerTempPath());
     await pp.setProperty("af", "scaletempo2=max-speed=8");
-    // 网络抖动时自动重连, 避免播放到一半直接中断
-    await pp.setProperty("stream-lavf-o",
-        "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5");
     if (Platform.isAndroid) {
       await pp.setProperty("volume-max", "100");
       await pp.setProperty("ao", "opensles");
@@ -227,20 +223,29 @@ abstract class _PlayerController with Store {
     page.changeEpisode(page.episode + 1);
   }
 
+  /// media_kit reports every error level log line here, including ones mpv
+  /// recovers from on its own (a probe request the server rejects, a retried
+  /// connection), so only tell the user when the video never loaded.
   void _onError(String error) {
     if (error.isEmpty) {
       return;
     }
-    final DateTime now = DateTime.now();
-    if (error == _lastError &&
-        now.difference(_lastErrorAt) < const Duration(seconds: 5)) {
-      return;
-    }
-    _lastError = error;
-    _lastErrorAt = now;
     debugPrint('播放器错误 $error $videoUrl');
-    SmartDialog.showToast('播放出错: $error',
-        displayType: SmartToastType.onlyRefresh);
+    final Player player = mediaPlayer;
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!_hasPlayer ||
+          !identical(player, mediaPlayer) ||
+          player.state.duration > Duration.zero) {
+        return;
+      }
+      final DateTime now = DateTime.now();
+      if (now.difference(_lastErrorAt) < const Duration(seconds: 10)) {
+        return;
+      }
+      _lastErrorAt = now;
+      SmartDialog.showToast('视频加载失败: $error',
+          displayType: SmartToastType.onlyRefresh);
+    });
   }
 
   void _resetDanmakuFeed() {

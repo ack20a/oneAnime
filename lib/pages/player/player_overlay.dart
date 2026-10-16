@@ -80,9 +80,6 @@ class PlayerOverlayState extends State<PlayerOverlay> {
 
   _Panel? _panel;
 
-  late final Stream<DateTime> _clock =
-      Stream.periodic(const Duration(seconds: 15), (_) => DateTime.now());
-
   late final ReactionDisposer _playingReaction;
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
@@ -579,6 +576,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
               // 双击快进快退提示
               if (_doubleTapSide != 0)
                 Positioned(
+                  key: const ValueKey('doubleTap'),
                   top: 0,
                   bottom: 0,
                   left: _doubleTapSide < 0 ? 0 : null,
@@ -591,6 +589,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
               // 中央提示
               if (_hintText != null)
                 Positioned(
+                  key: const ValueKey('hint'),
                   top: height * 0.18,
                   left: 0,
                   right: 0,
@@ -602,6 +601,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
                 ),
               // 顶部栏
               Positioned(
+                key: const ValueKey('topBar'),
                 top: 0,
                 left: 0,
                 right: 0,
@@ -609,6 +609,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
               ),
               // 底部栏
               Positioned(
+                key: const ValueKey('bottomBar'),
                 bottom: 0,
                 left: 0,
                 right: 0,
@@ -617,6 +618,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
               // 暂停时的中央播放按钮
               if (showBars)
                 Center(
+                  key: const ValueKey('play'),
                   child: Observer(builder: (context) {
                     if (videoController.playing ||
                         videoController.isBuffering) {
@@ -632,6 +634,7 @@ class PlayerOverlayState extends State<PlayerOverlay> {
               // 锁定按钮
               if (_isMobile && widget.isFullscreen)
                 Positioned(
+                  key: const ValueKey('lock'),
                   left: 24,
                   top: 0,
                   bottom: 0,
@@ -725,19 +728,9 @@ class PlayerOverlayState extends State<PlayerOverlay> {
             ),
           ),
           if (fullscreen)
-            StreamBuilder<DateTime>(
-              stream: _clock,
-              initialData: DateTime.now(),
-              builder: (context, snapshot) {
-                final DateTime now = snapshot.data ?? DateTime.now();
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                );
-              },
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: _Clock(),
             ),
           Observer(builder: (context) {
             return IconButton(
@@ -886,6 +879,50 @@ class PlayerOverlayState extends State<PlayerOverlay> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Wall clock for the fullscreen top bar, refreshed on the minute.
+class _Clock extends StatefulWidget {
+  const _Clock();
+
+  @override
+  State<_Clock> createState() => _ClockState();
+}
+
+class _ClockState extends State<_Clock> {
+  Timer? _timer;
+  DateTime _now = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleTick();
+  }
+
+  void _scheduleTick() {
+    final DateTime now = DateTime.now();
+    _timer = Timer(Duration(seconds: 60 - now.second), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _now = DateTime.now());
+      _scheduleTick();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '${_now.hour.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')}',
+      style: const TextStyle(color: Colors.white70, fontSize: 13),
     );
   }
 }

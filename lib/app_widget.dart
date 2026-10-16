@@ -75,6 +75,7 @@ class _AppWidgetState extends State<AppWidget> {
       darkTheme: themeProvider.dark,
       themeMode: themeProvider.themeMode,
       routerConfig: Modular.routerConfig,
+      scrollBehavior: const _RubberBandScrollBehavior(),
       builder: FlutterSmartDialog.init(),
     );
     Modular.setObservers([FlutterSmartDialog.observer]);
@@ -100,4 +101,19 @@ class _AppWidgetState extends State<AppWidget> {
 
     return app;
   }
+}
+
+/// Telegram lets every list rubber-band past its ends, with resistance
+/// growing the further it is pulled, on Android as on iOS.
+class _RubberBandScrollBehavior extends MaterialScrollBehavior {
+  const _RubberBandScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+
+  @override
+  Widget buildOverscrollIndicator(
+          BuildContext context, Widget child, ScrollableDetails details) =>
+      child;
 }

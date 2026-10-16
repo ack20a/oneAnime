@@ -81,6 +81,9 @@ class Utils {
     String pad(int n) => n.toString().padLeft(2, '0');
     var minutes = pad(duration.inMinutes % 60);
     var seconds = pad(duration.inSeconds % 60);
+    if (duration.inHours > 0) {
+      return "${duration.inHours}:$minutes:$seconds";
+    }
     return "$minutes:$seconds";
   }
 

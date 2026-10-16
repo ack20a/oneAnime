@@ -1,4 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:oneanime/pages/menu/menu.dart';
+import 'package:oneanime/bean/anime/anime_card_skeleton.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:oneanime/pages/popular/popular_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -25,6 +30,7 @@ class _PopularPageState extends State<PopularPage>
   final FocusNode _focusNode = FocusNode();
   final TextEditingController _controller = TextEditingController();
   final ScrollController scrollController = ScrollController();
+  StreamSubscription<int>? _reselect;
   final PopularController popularController = Modular.get<PopularController>();
 
   @override
@@ -33,6 +39,13 @@ class _PopularPageState extends State<PopularPage>
   @override
   void initState() {
     super.initState();
+    _reselect = TabReselect.events.listen((int index) {
+      if (index == 0 && scrollController.hasClients) {
+        scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic);
+      }
+    });
     if (popularController.cacheList.isEmpty) {
       debugPrint('Popular list is empty, loading...');
       popularController.getAnimeList();
@@ -56,6 +69,7 @@ class _PopularPageState extends State<PopularPage>
 
   @override
   void dispose() {
+    _reselect?.cancel();
     scrollController.removeListener(() {});
     if (popularController.keyword != '') {
       popularController.filterList('');
@@ -127,7 +141,8 @@ class _PopularPageState extends State<PopularPage>
                   style: const TextStyle(color: Colors.white, fontSize: 20),
                   decoration: InputDecoration(
                     hintText: i18n.popular.searchBar,
-                    hintStyle: const TextStyle(color: Colors.white, fontSize: 20),
+                    hintStyle:
+                        const TextStyle(color: Colors.white, fontSize: 20),
                     border: InputBorder.none,
                     prefixIcon: const Icon(Icons.search, color: Colors.white),
                   ),
@@ -136,7 +151,7 @@ class _PopularPageState extends State<PopularPage>
                   onTap: () {
                     setState(() {
                       _focusNode.requestFocus();
-                      _controller.clear(); 
+                      _controller.clear();
                     });
                   },
                   onChanged: (t) {
@@ -181,13 +196,13 @@ class _PopularPageState extends State<PopularPage>
                       ),
                     ),
                     const Padding(
-                      padding: EdgeInsets.only(
-                          left: 10.0), 
+                      padding: EdgeInsets.only(left: 10.0),
                     ),
                     FloatingActionButton(
                       onPressed: () async {
                         await popularController.getAnimeList();
-                        SmartDialog.showToast(i18n.toast.refreshAnimeListWithSuccess);
+                        SmartDialog.showToast(
+                            i18n.toast.refreshAnimeListWithSuccess);
                       },
                       heroTag: null,
                       child: const Icon(Icons.refresh),
@@ -211,6 +226,8 @@ class _PopularPageState extends State<PopularPage>
     return Observer(builder: (context) {
       return ListView.separated(
         controller: scrollController,
+        // Build cards half a screen ahead so fast flings never show blanks.
+        scrollCacheExtent: const ScrollCacheExtent.pixels(500),
         separatorBuilder: (context, index) => const SizedBox(height: 8.0),
         itemCount: popularController.cacheList.isEmpty
             ? 1
@@ -222,15 +239,7 @@ class _PopularPageState extends State<PopularPage>
                   index: index,
                   type: 'popular')
               : (popularController.keyword == ''
-                  ? const SizedBox(
-                      height: 600,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(),
-                        ],
-                      ))
+                  ? const AnimeCardSkeletonList()
                   : SizedBox(
                       height: 600,
                       child: Column(

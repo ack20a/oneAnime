@@ -1,12 +1,25 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:oneanime/request/request.dart';
 import 'package:oneanime/request/api.dart';
+import 'package:oneanime/request/bangumi_data.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:oneanime/bean/danmaku/danmaku_module.dart';
+import 'package:oneanime/utils/anime_title.dart';
 import 'package:oneanime/utils/utils.dart';
 import 'package:oneanime/utils/mortis.dart';
+
+/// 弹弹Play rejected the app credentials, so no danmaku can load at all.
+class DanmakuAuthException implements Exception {
+  final String reason;
+
+  DanmakuAuthException(this.reason);
+
+  @override
+  String toString() => 'DanmakuAuthException: $reason';
+}
 
 class DanmakuRequest {
   /// Request.get() reports network failures as a normal response carrying
@@ -41,14 +54,25 @@ class DanmakuRequest {
     final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final res = await Request().get(Api.dandanAPIDomain + path,
         data: query,
-        options: Options(headers: {
-          'user-agent': Utils.getRandomUA(),
-          'referer': '',
-          'X-Auth': 1,
-          'X-AppId': mortis['id'],
-          'X-Timestamp': timestamp.toString(),
-          'X-Signature': Utils.generateDandanSignature(path, timestamp),
-        }));
+        options: Options(
+            // Status codes are checked here, so a rejected signature is not
+            // reported as a generic "Server error" toast.
+            validateStatus: (_) => true,
+            extra: {
+              'silent': true
+            },
+            headers: {
+              'user-agent': Utils.getRandomUA(),
+              'referer': '',
+              'X-Auth': 1,
+              'X-AppId': mortis['id'],
+              'X-Timestamp': timestamp.toString(),
+              'X-Signature': Utils.generateDandanSignature(path, timestamp),
+            }));
+    if (res.statusCode == 401 || res.statusCode == 403) {
+      throw DanmakuAuthException(
+          res.headers.value('x-error-message') ?? 'HTTP ${res.statusCode}');
+    }
     return _asJsonMap(res.data);
   }
 
@@ -77,8 +101,8 @@ class DanmakuRequest {
         await _dandanGet(Api.dandanAPIBgmtv + subjectId.toString());
     final animeId = _asJsonMap(jsonData['bangumi'])['animeId'];
     if (animeId is! int) {
-      material.debugPrint(
-          '弹弹Play 未收录 Bangumi 条目 $subjectId ${_errorOf(jsonData)}');
+      material
+          .debugPrint('弹弹Play 未收录 Bangumi 条目 $subjectId ${_errorOf(jsonData)}');
       return null;
     }
     return animeId;
@@ -86,15 +110,15 @@ class DanmakuRequest {
 
   /// Bangumi.tv subject id for [title], or null when the search misses.
   static Future<int?> getBgmSubjectId(String title) async {
-    final res = await Request().get(
-        Api.bangumiSearch + Uri.encodeComponent(title),
-        data: {'type': '2', 'responseGroup': 'small'},
-        options: Options(headers: {
-          // UA format required by the Bangumi API docs.
-          'user-agent':
-              'Predidit/oneAnime/${Api.version} (Android) (${Api.sourceUrl})',
-          'referer': '',
-        }));
+    final res =
+        await Request().get(Api.bangumiSearch + Uri.encodeComponent(title),
+            data: {'type': '2', 'responseGroup': 'small'},
+            options: Options(headers: {
+              // UA format required by the Bangumi API docs.
+              'user-agent':
+                  'Predidit/oneAnime/${Api.version} (Android) (${Api.sourceUrl})',
+              'referer': '',
+            }));
     final list = _asJsonList(_asJsonMap(res.data)['list']);
     final id = list.isEmpty ? null : _asJsonMap(list.first)['id'];
     if (id is! int) {
@@ -102,6 +126,255 @@ class DanmakuRequest {
       return null;
     }
     return id;
+  }
+
+  static Future<Map<String, dynamic>> _bahaGet(
+      String url, Map<String, String> query) async {
+    final res = await Request().get(url,
+        data: query,
+        options: Options(validateStatus: (_) => true, extra: {
+          'silent': true
+        }, headers: {
+          'user-agent': Utils.getRandomUA(),
+          'referer': 'https://ani.gamer.com.tw/',
+        }));
+    if (res.statusCode != 200) {
+      material.debugPrint('巴哈姆特请求失败 $url HTTP ${res.statusCode}');
+      return <String, dynamic>{};
+    }
+    return _asJsonMap(res.data);
+  }
+
+  /// 巴哈姆特 video_sn of any episode of the anime titled [title]. Both sites
+  /// use traditional Chinese titles but write seasons differently, and the
+  /// search often misses on Anime1's season markers, so it is retried without
+  /// them. A hit with another name or season is a different work and ignored.
+  static Future<int?> _bahaAnyVideoSn(String title) async {
+    final AnimeTitle target = AnimeTitle.parse(title);
+    if (target.name.isEmpty) {
+      return null;
+    }
+    final String bare = AnimeTitle.withoutSeason(title);
+    for (final String keyword in {title, if (bare.isNotEmpty) bare}) {
+      final jsonData = await _bahaGet(Api.bahaSearch, {'kw': keyword});
+      int? best;
+      int bestDistance = 1 << 30;
+      for (final item in _asJsonList(jsonData['anime'])) {
+        final anime = _asJsonMap(item);
+        final videoSn = anime['video_sn'];
+        final int? distance = target
+            .distanceTo(AnimeTitle.parse((anime['title'] ?? '').toString()));
+        if (videoSn is int && distance != null && distance < bestDistance) {
+          best = videoSn;
+          bestDistance = distance;
+        }
+      }
+      if (best != null) {
+        return best;
+      }
+    }
+    material.debugPrint('巴哈姆特搜索 $title 无匹配');
+    return null;
+  }
+
+  /// 巴哈姆特 video_sn of [episode]. Group "0" is the main (subtitled) release,
+  /// other groups are dubs or alternative cuts.
+  static Future<int?> _bahaEpisodeSn(int anyVideoSn, int episode) async {
+    final jsonData =
+        await _bahaGet(Api.bahaVideo, {'videoSn': anyVideoSn.toString()});
+    final groups = _asJsonMap(
+        _asJsonMap(_asJsonMap(jsonData['data'])['anime'])['episodes']);
+    if (groups.isEmpty) {
+      return null;
+    }
+    final List<dynamic> episodes =
+        _asJsonList(groups['0'] ?? groups.values.first);
+    for (final item in episodes) {
+      final ep = _asJsonMap(item);
+      if (ep['episode'] == episode && ep['videoSn'] is int) {
+        return ep['videoSn'];
+      }
+    }
+    material.debugPrint('巴哈姆特未找到第 $episode 集');
+    return null;
+  }
+
+  /// Danmaku from 巴哈姆特動畫瘋, which needs no credentials. Empty when the
+  /// anime or the episode is not carried there.
+  static Future<List<Danmaku>> getBahaDanmaku(String title, int episode) async {
+    final int? anySn = await _bahaAnyVideoSn(title);
+    if (anySn == null) {
+      return [];
+    }
+    final int? videoSn = await _bahaEpisodeSn(anySn, episode);
+    if (videoSn == null) {
+      return [];
+    }
+    final jsonData = await _bahaGet(
+        Api.bahaDanmu, {'geo': 'TW,HK', 'videoSn': videoSn.toString()});
+    final List<Danmaku> danmakus = [];
+    for (final item in _asJsonList(_asJsonMap(jsonData['data'])['danmu'])) {
+      final danmu = _asJsonMap(item);
+      final text = danmu['text'];
+      final time = danmu['time'];
+      if (text is! String || text.isEmpty || time is! num) {
+        continue;
+      }
+      final String color = (danmu['color'] ?? '').toString();
+      danmakus.add(Danmaku(
+        // Tenths of a second.
+        p: time / 10,
+        m: text,
+        // 巴哈姆特 positions: 0 scrolling, 1 top, 2 bottom.
+        mode: switch (danmu['position']) { 1 => 5, 2 => 4, _ => 1 },
+        color: (color.startsWith('#')
+                ? int.tryParse(color.substring(1), radix: 16)
+                : null) ??
+            0xFFFFFF,
+      ));
+    }
+    material.debugPrint('巴哈姆特弹幕 $videoSn 共 ${danmakus.length} 条');
+    return danmakus;
+  }
+
+  static const Map<String, String> _biliHeaders = {
+    'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    'referer': 'https://www.bilibili.com/',
+  };
+
+  /// `result` of a Bilibili pgc API response, or an empty map on any error.
+  static Future<Map<String, dynamic>> _biliResult(
+      String url, Map<String, String> query) async {
+    final res = await Request().get(url,
+        data: query,
+        options: Options(
+            validateStatus: (_) => true,
+            extra: {'silent': true},
+            headers: _biliHeaders));
+    final json = _asJsonMap(res.data);
+    if (res.statusCode != 200 || json['code'] != 0) {
+      material.debugPrint(
+          'B站请求失败 $url HTTP ${res.statusCode} ${json['code']} ${json['message']}');
+      return <String, dynamic>{};
+    }
+    return _asJsonMap(json['result']);
+  }
+
+  /// cid of [episode] in the season behind the Bilibili [mediaId]. Trailers
+  /// share the episode numbers they announce, so only regular episodes count.
+  static Future<int?> _biliEpisodeCid(int mediaId, int episode) async {
+    final media = _asJsonMap((await _biliResult(
+        Api.biliMedia, {'media_id': mediaId.toString()}))['media']);
+    final seasonId = media['season_id'];
+    if (seasonId is! int) {
+      return null;
+    }
+    final season =
+        await _biliResult(Api.biliSeason, {'season_id': seasonId.toString()});
+    final List<Map<String, dynamic>> episodes = [
+      for (final item in _asJsonList(season['episodes']))
+        if ((_asJsonMap(item)['section_type'] ?? 0) == 0 &&
+            _asJsonMap(item)['badge'] != '预告')
+          _asJsonMap(item),
+    ];
+    for (final ep in episodes) {
+      if (int.tryParse('${ep['title']}'.trim()) == episode &&
+          ep['cid'] is int) {
+        return ep['cid'];
+      }
+    }
+    // Some seasons title episodes by name only; fall back to their order.
+    final bool numbered =
+        episodes.any((ep) => int.tryParse('${ep['title']}'.trim()) != null);
+    if (!numbered && episode >= 1 && episode <= episodes.length) {
+      final cid = episodes[episode - 1]['cid'];
+      return cid is int ? cid : null;
+    }
+    material.debugPrint('B站 season $seasonId 未找到第 $episode 集');
+    return null;
+  }
+
+  /// The XML body, which Bilibili sends raw-deflated whatever the request
+  /// accepts, and which dart:io only inflates when it is gzip.
+  static String _biliXml(List<int> bytes) {
+    if (bytes.isEmpty || bytes.first == 0x3C /* < */) {
+      return utf8.decode(bytes, allowMalformed: true);
+    }
+    if (bytes.length > 1 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
+      return utf8.decode(gzip.decode(bytes), allowMalformed: true);
+    }
+    try {
+      return utf8.decode(ZLibDecoder(raw: true).convert(bytes),
+          allowMalformed: true);
+    } catch (_) {
+      return utf8.decode(ZLibDecoder().convert(bytes), allowMalformed: true);
+    }
+  }
+
+  static final RegExp _biliDanmakuPattern =
+      RegExp(r'<d p="([^"]*)">([^<]*)</d>');
+
+  static String _unescapeXml(String text) => text
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&apos;', "'")
+      .replaceAll('&amp;', '&');
+
+  /// Danmaku from Bilibili, found through bangumi-data since Bilibili's own
+  /// search needs a logged in session. Empty when the anime is not mapped or
+  /// the episode is missing.
+  static Future<List<Danmaku>> getBiliDanmaku(String title, int episode) async {
+    final BangumiDataEntry? entry = await BangumiData.find(title);
+    if (entry == null) {
+      return [];
+    }
+    int? cid;
+    for (final int mediaId in entry.bilibiliMediaIds) {
+      cid = await _biliEpisodeCid(mediaId, episode);
+      if (cid != null) {
+        break;
+      }
+    }
+    if (cid == null) {
+      return [];
+    }
+    final res = await Request().get(Api.biliDanmaku,
+        data: {'oid': cid.toString()},
+        options: Options(
+            validateStatus: (_) => true,
+            extra: {'silent': true},
+            headers: _biliHeaders),
+        extra: {'resType': ResponseType.bytes});
+    final data = res.data;
+    if (res.statusCode != 200 || data is! List<int>) {
+      material.debugPrint('B站弹幕 $cid 下载失败 HTTP ${res.statusCode}');
+      return [];
+    }
+    final List<Danmaku> danmakus = [];
+    for (final RegExpMatch match
+        in _biliDanmakuPattern.allMatches(_biliXml(data))) {
+      // "time,mode,fontsize,color,..." with mode 1-3 scrolling, 4 bottom,
+      // 5 top; 7 and 8 are scripted danmaku that cannot be shown as text.
+      final List<String> p = match.group(1)!.split(',');
+      final double? time = double.tryParse(p[0]);
+      final int mode = p.length > 1 ? int.tryParse(p[1]) ?? 1 : 1;
+      final String text = _unescapeXml(match.group(2)!);
+      if (time == null || mode > 5 || text.isEmpty) {
+        continue;
+      }
+      danmakus.add(Danmaku(
+        p: time,
+        m: text,
+        mode: mode <= 3 ? 1 : mode,
+        color: p.length > 3
+            ? (int.tryParse(p[3]) ?? 0xFFFFFF) & 0xFFFFFF
+            : 0xFFFFFF,
+      ));
+    }
+    material.debugPrint('B站弹幕 $cid 共 ${danmakus.length} 条');
+    return danmakus;
   }
 
   /// Danmaku for one episode. Episode ids are the anime id followed by the

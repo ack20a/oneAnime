@@ -125,13 +125,16 @@ abstract class _VideoController with Store {
   }
 
   /// 巴哈姆特動畫瘋 needs no credentials and carries most of what Anime1 does,
-  /// so it goes first; 弹弹Play only fills in when it has nothing, and only
-  /// works in builds that ship valid 弹弹Play credentials.
+  /// so it goes first. Bilibili covers much of the rest; 弹弹Play comes last
+  /// and only works in builds that ship valid 弹弹Play credentials.
   Future<void> getDanDanmaku(String title, int episode) async {
     final int requestId = ++_danmakuRequestId;
     danDanmakus.clear();
 
     List<Danmaku> res = await _bahaDanmaku(title, episode);
+    if (res.isEmpty) {
+      res = await _biliDanmaku(title, episode);
+    }
     if (res.isEmpty) {
       res = await _dandanDanmaku(title, episode);
     }
@@ -151,6 +154,15 @@ abstract class _VideoController with Store {
       return await DanmakuRequest.getBahaDanmaku(title, episode);
     } catch (e) {
       debugPrint('巴哈姆特弹幕加载失败 ${e.toString()}');
+      return [];
+    }
+  }
+
+  Future<List<Danmaku>> _biliDanmaku(String title, int episode) async {
+    try {
+      return await DanmakuRequest.getBiliDanmaku(title, episode);
+    } catch (e) {
+      debugPrint('B站弹幕加载失败 ${e.toString()}');
       return [];
     }
   }
